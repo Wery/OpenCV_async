@@ -2,6 +2,7 @@ package com.example.opencv_async;
 
 import java.lang.reflect.Method;
 import java.util.List;
+import java.util.Random;
 import java.util.Timer;
 import java.util.TimerTask;
 
@@ -44,13 +45,12 @@ import android.view.SurfaceView;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewGroup.LayoutParams;
-import android.view.WindowManager;
 import android.view.animation.Animation;
-import android.view.animation.Animation.AnimationListener;
+import android.view.animation.RotateAnimation;
+import android.view.WindowManager;
 import android.widget.Button;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
-import android.widget.LinearLayout;
 import android.widget.RelativeLayout;
 import android.widget.SeekBar;
 import android.widget.TextView;
@@ -67,7 +67,8 @@ import com.jjoe64.graphview.LineGraphView;
  */
 public class OpenCVTutorial extends Activity implements OpenCVWorker.ResultCallback,
         SurfaceHolder.Callback, View.OnTouchListener, GestureDetector.OnDoubleTapListener {
-    public static final int DRAW_RESULT_BITMAP = 10;
+    
+	public static final int DRAW_RESULT_BITMAP = 10;
     private Handler mUiHandler;
     private SurfaceView mSurfaceView;
     private SurfaceHolder mSurfaceHolder;
@@ -111,6 +112,8 @@ public class OpenCVTutorial extends Activity implements OpenCVWorker.ResultCallb
     TextView magnetTxtView;
     TextView wifiTB;
     TextView compassTB;
+    TextView tv;
+    
     Button startBtn;
     Button stopBtn;
     ImageView reddot;
@@ -217,7 +220,7 @@ public class OpenCVTutorial extends Activity implements OpenCVWorker.ResultCallb
 	     
 	     
 	     alphaSeekBar = (SeekBar)findViewById(R.id.seekBar1); // make seekbar object
-	     textview = (TextView) findViewById(R.id.textView4);        
+	     //textview = (TextView) findViewById(R.id.textView4);        
 // -*--*-*-*-*-*-*-*-*-*-*-*--*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-
 	      exampleSeries =  new GraphViewSeries("LINE ONE", new GraphViewSeriesStyle(Color.BLUE, 2), 
 				  new GraphViewData[] { new GraphViewData(0, 0) }); 
@@ -237,10 +240,7 @@ public class OpenCVTutorial extends Activity implements OpenCVWorker.ResultCallb
 	    gv.setViewPort(1, 500);
 	    gv.setScalable(true);
 	   
-	     
-	    
-	     
-	    
+  
 // -*--*-*-*-*-*-*-*-*-*-*-*--*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-* 
 	     comapsImage = (ImageView) compasView.findViewById(R.id.radar);
 	     
@@ -248,22 +248,20 @@ public class OpenCVTutorial extends Activity implements OpenCVWorker.ResultCallb
 	     stopBtn = (Button) findViewById(R.id.btn_stop);
 	     resetBtn = (Button) findViewById(R.id.reset);
 	     
-	     
-	     
 	     accTxtView = (TextView) findViewById(R.id.textView1); 
 	     gyroTxtView = (TextView) findViewById(R.id.gyro); 
 	     magnetTxtView = (TextView) findViewById(R.id.magnetometer); 	     
 	     wifiTB = (TextView) findViewById(R.id.wifiTB); 
-	     compassTB = (TextView) findViewById(R.id.textView2);
-	     textview =(TextView) findViewById(R.id.textView3);
-	     
-	     compass = new Compass(this,comapsImage, compassTB,gv,exampleSeries);
-	     //compass.testTextBox = (TextView) findViewById(R.id.textView3);
-	     compass.testTextBox2 = (TextView) findViewById(R.id.textView4);
-	     compass.start();
-	     
+	     compassTB = (TextView) findViewById(R.id.textView4);
+	     textview = (TextView) findViewById(R.id.textView3);
+	     tv = (TextView) findViewById(R.id.textView2);
 	     	     
-	    
+	     compass = new Compass(this,compassTB,gv,exampleSeries);
+	     compass.testTextBox = tv;
+	     compass.testTextBox2 = compassTB;
+	     compass.arrowView = comapsImage;
+	     compass.start();
+	     	     	     	    
 	     //inflaterGraph = (LayoutInflater)this.getSystemService(Context.LAYOUT_INFLATER_SERVICE);//LayoutInflater.from(this);
 	     //dotView = inflater.inflate(R.layout.dot,null);
 	     dotView = inflater.inflate(R.layout.dotlayout, overlayFramelayout,false);
@@ -282,9 +280,9 @@ public class OpenCVTutorial extends Activity implements OpenCVWorker.ResultCallb
 	     pedometer.gyroSeries = gyroSeries;
 	     pedometer.compassTextBox = compassTB;
 	     pedometer.testTextBox2 = magnetTxtView;	     
-	     pedometer.start();
+	     pedometer.start();	     
+	     	
 	     
-	     	     
 	     //mCustomDrawableView = new CustomDrawableView(this);
 	     //setContentView(mCustomDrawableView); 
         // compas overlay end
@@ -305,24 +303,16 @@ public class OpenCVTutorial extends Activity implements OpenCVWorker.ResultCallb
 	    	};   
     
 	     initButtons();
-
-	     
-	     
+	     draw = new Drawing(this);
+	     overlayFramelayout.addView(draw);	     
     }  
-    
-    @Override
-    protected void onStart()
-    {
-    	 super.onStart();
-    	 //compass.start();
-    }
-    
+       
     @Override
     protected void onResume() {
         super.onResume();
 
-	     timer = new Timer(true);
-	     timer.scheduleAtFixedRate(new TimerTask(){
+	   timer = new Timer(true);
+	   timer.scheduleAtFixedRate(new TimerTask(){
 	    	 @Override
 	    	 public void run() {
 	    		 runOnUiThread(new Runnable() {
@@ -355,20 +345,16 @@ public class OpenCVTutorial extends Activity implements OpenCVWorker.ResultCallb
         mSurfaceView.setOnTouchListener(this);        
        
         setContentView(overlayFramelayout);
-       // overlayFramelayout.addView(mSurfaceView);
-       // overlayFramelayout.addView(compasView);
-       // overlayFramelayout.addView(dotView);
-        //overlayFramelayout.addView(gv);
+
         /*
         setContentView(glView);
         addContentView(mSurfaceView, new LayoutParams(LayoutParams.FILL_PARENT, LayoutParams.FILL_PARENT));
         addContentView(compasView, new LayoutParams(LayoutParams.FILL_PARENT, LayoutParams.FILL_PARENT));
         addContentView(gv, new LayoutParams(500,200));
          */
-        //compass.start();
+        
+        compass.start();      
         pedometer.start();
-        
-        
       }
 
     @Override
@@ -385,8 +371,9 @@ public class OpenCVTutorial extends Activity implements OpenCVWorker.ResultCallb
         
         glView.onPause();
         //mSensorManager.unregisterListener(this);
-       //compass.stop();
-       pedometer.stop();
+       
+        compass.stop();
+        pedometer.stop();
     }
 
   //**************************************************************************** BUTTONS
@@ -395,11 +382,11 @@ public class OpenCVTutorial extends Activity implements OpenCVWorker.ResultCallb
     	View.OnClickListener btnStartHandler = new View.OnClickListener() {			
 			@Override
 			public void onClick(View v) {
-				//compass.startFlag = true;
-				//compass.stopFlag = false;
+				compass.startFlag = true;
+				compass.stopFlag = false;
 				
-				pedometer.startFlag = true;
-				pedometer.stopFlag = false;
+				//pedometer.startFlag = true;
+				//pedometer.stopFlag = false;
 				Toast.makeText(getBaseContext(), "Start logging...", Toast.LENGTH_SHORT).show();			
 			}
 		};
@@ -407,13 +394,13 @@ public class OpenCVTutorial extends Activity implements OpenCVWorker.ResultCallb
     	View.OnClickListener btnStopHandler = new View.OnClickListener() {			
 			@Override
 			public void onClick(View v) {
-				//compass.stopFlag = true;	
-				//compass.startFlag = false;
-				//compass.isFirstSet = true;
-
 				compass.stopFlag = true;	
 				compass.startFlag = false;
 				compass.isFirstSet = true;
+
+				//pedometer.stopFlag = true;	
+				//pedometer.startFlag = false;
+				//pedometer.isFirstSet = true;
 				Toast.makeText(getBaseContext(), "Stop logging...", Toast.LENGTH_SHORT).show();			
 			}
 		};
@@ -596,16 +583,23 @@ public class OpenCVTutorial extends Activity implements OpenCVWorker.ResultCallb
 
     
     private Bitmap mBitmap;
-    
+    Drawing draw;
     private void wifiInfo()
     {
     	mBitmap = BitmapFactory.decodeResource(getResources(), R.drawable.red);
-    	
-    	
+   	
     	xr=reddot.getLeft();
     	yr=reddot.getTop();
     	x_move=xr+40;
     	y_move=yr+100;
+    	
+    	Random r=new Random();
+    	float o1=(r.nextFloat()*10);
+    	float o2=(r.nextFloat()*10);
+    	
+    	draw.drawCircle(100+o1, 50+o2);
+    	draw.drawCircle(300+o1, 150+o2);
+    	draw.drawCircle(400+o1, 250+o2);
 
     	RelativeLayout.LayoutParams redMarginParams = new  RelativeLayout.LayoutParams(reddot.getLayoutParams());
     	redMarginParams.setMargins(x_move, y_move, 0, 0);
@@ -620,7 +614,17 @@ public class OpenCVTutorial extends Activity implements OpenCVWorker.ResultCallb
         yellowMarginParams.setMargins(x_move, y_move, 0, 0);
         yellowdot.setLayoutParams(yellowMarginParams);
         
-    	//textview.setText("dot view size:"+layoutParams.+" , "+reddot.getRight());
+        
+        Animation an = new RotateAnimation(0, 180,
+                Animation.RELATIVE_TO_SELF, 0.5f, Animation.RELATIVE_TO_SELF,
+                0.5f);
+		an.setDuration(5);
+		an.setRepeatCount(0);
+		an.setFillAfter(true);
+		
+		comapsImage.startAnimation(an);
+
+    	tv.setText("dot view size:"+draw.mPointers.size());
 
     	int linkSpeed = wifimanager.getConnectionInfo().getRssi();	
     	Method[] methods = wifimanager.getClass().getDeclaredMethods();
@@ -649,26 +653,7 @@ public class OpenCVTutorial extends Activity implements OpenCVWorker.ResultCallb
     int yy = 0;
     int x_move = 0;
     int y_move = 0;
-    private class MyAnimationListener implements AnimationListener{
 
-        @Override
-        public void onAnimationEnd(Animation animation) {
-        	reddot.clearAnimation();
-        	//MarginLayoutParams marginParams = new MarginLayoutParams(reddot.getLayoutParams());        	        
-        	LinearLayout.LayoutParams marginParams = new  LinearLayout.LayoutParams(reddot.getLayoutParams());
-        	marginParams.setMargins(x_move, y_move, 0, 0);
-            reddot.setLayoutParams(marginParams);
-        }
-
-        @Override
-        public void onAnimationRepeat(Animation animation) {
-        }
-
-        @Override
-        public void onAnimationStart(Animation animation) {
-        }
-
-    }
     
     public void showThresholdAdaptiveValueDialog()
     {
