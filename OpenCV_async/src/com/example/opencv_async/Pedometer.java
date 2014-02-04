@@ -1,7 +1,14 @@
 package com.example.opencv_async;
 
+import java.util.ArrayList;
 import java.util.Timer;
 import java.util.TimerTask;
+
+import org.apache.http.NameValuePair;
+import org.apache.http.message.BasicNameValuePair;
+import org.json.JSONArray;
+import org.json.JSONException;
+import org.json.JSONObject;
 
 import android.content.Context;
 import android.hardware.Sensor;
@@ -9,8 +16,8 @@ import android.hardware.SensorEvent;
 import android.hardware.SensorEventListener;
 import android.hardware.SensorManager;
 import android.os.Handler;
+import android.util.Log;
 import android.widget.ImageView;
-import android.widget.RelativeLayout;
 import android.widget.TextView;
 
 import com.jjoe64.graphview.GraphView;
@@ -64,6 +71,57 @@ public class Pedometer implements SensorEventListener {
     
     private static final Classifier classifier = new Classifier();
     
+    String returnString;
+    
+    SharedValue sv;
+    
+    public void getHTTPdata(int id){
+    	 ArrayList<NameValuePair> postParameters = new ArrayList<NameValuePair>();
+    	 postParameters.add(new BasicNameValuePair("id",id+""));
+    	 String response = null;
+    	 testTextBox2.setText("getHTTPdata");
+    	 
+    	 try {
+    	     response = CustomHttpClient.executeHttpPost(
+    	       //"http://129.107.187.135/CSE5324/jsonscript.php", // your ip address if using localhost server
+    	       sv.getServerAddr(),  // in case of a remote server
+    	       postParameters);
+    	     
+    	     // store the result returned by PHP script that runs MySQL query
+    	     String result = response.toString();  
+    	     //parse json data
+             try{
+                     returnString = "";
+               JSONArray jArray = new JSONArray(result);
+                     for(int i=0;i<jArray.length();i++){
+                             JSONObject json_data = jArray.getJSONObject(i);
+                             //Log.i("log_tag","id: "+json_data.getInt("id")+
+                             //        ", name: "+json_data.getString("name")+
+                             //        ", sex: "+json_data.getInt("sex")+
+                             //        ", birthyear: "+json_data.getInt("birthyear")
+                             //);
+                             //Get an output to the screen
+                             returnString += "\n" + json_data.getInt("identyfikator") + " -> "+ json_data.getInt("x") + " -> "+ json_data.getInt("y");
+                     }
+             }
+             catch(JSONException e){
+                     Log.e("log_tag", "Error parsing data "+e.toString());
+             }
+         
+             try{
+            	 testTextBox2.setText(returnString);
+             }
+             catch(Exception e){
+              Log.e("log_tag","Error in Display!" + e.toString());;          
+             }   
+        }
+              catch (Exception e) {
+         Log.e("log_tag","Error in http connection!!" + e.toString());     
+        }
+
+    }
+    
+    
 	public Pedometer(Context c, ImageView dot){
 		this.context = c;
 		sensorManager = (SensorManager) context
@@ -78,6 +136,8 @@ public class Pedometer implements SensorEventListener {
 		//gyro = new float[3];
 		
 		this.redDot = dot;
+		
+		sv = new SharedValue();
 	}
 	
 	public void setAlpha(float a){
@@ -164,7 +224,7 @@ public class Pedometer implements SensorEventListener {
     		
     		x = redDot.getLeft();
             y = redDot.getTop();
-            testTextBox2.setText("dot X: "+x+" Y: "+y);
+           // testTextBox2.setText("dot X: "+x+" Y: "+y);
     }
 
     public void stop() {   

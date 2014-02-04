@@ -34,6 +34,7 @@ import android.net.wifi.WifiManager;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Message;
+import android.os.StrictMode;
 import android.util.Log;
 import android.view.GestureDetector;
 import android.view.LayoutInflater;
@@ -45,9 +46,9 @@ import android.view.SurfaceView;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewGroup.LayoutParams;
+import android.view.WindowManager;
 import android.view.animation.Animation;
 import android.view.animation.RotateAnimation;
-import android.view.WindowManager;
 import android.widget.Button;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
@@ -134,6 +135,7 @@ public class OpenCVTutorial extends Activity implements OpenCVWorker.ResultCallb
     GraphViewSeries gyroSeries;
     
     private Compass compass;
+    StepDetection sd;
     
     class WifiReceiver extends BroadcastReceiver { 
     	public void onReceive(Context c, Intent intent) { 
@@ -256,12 +258,19 @@ public class OpenCVTutorial extends Activity implements OpenCVWorker.ResultCallb
 	     textview = (TextView) findViewById(R.id.textView3);
 	     tv = (TextView) findViewById(R.id.textView2);
 	     	     
-	     compass = new Compass(this,compassTB,gv,exampleSeries);
-	     compass.testTextBox = tv;
-	     compass.testTextBox2 = compassTB;
-	     compass.arrowView = comapsImage;
-	     compass.start();
-	     	     	     	    
+	     //compass = new Compass(this,gv,exampleSeries);
+	     //compass.compassTextBox = compassTB;
+	     //compass.testTextBox = tv;
+	     //compass.testTextBox2 = magnetTxtView;
+	     //compass.arrowView = comapsImage;
+	     //compass.start();
+	     
+	     sd = new StepDetection(this);
+	     sd.tv = tv;
+	     sd.compassTB = compassTB;
+	     
+	     sd.startSensor();
+	     
 	     //inflaterGraph = (LayoutInflater)this.getSystemService(Context.LAYOUT_INFLATER_SERVICE);//LayoutInflater.from(this);
 	     //dotView = inflater.inflate(R.layout.dot,null);
 	     dotView = inflater.inflate(R.layout.dotlayout, overlayFramelayout,false);
@@ -271,15 +280,15 @@ public class OpenCVTutorial extends Activity implements OpenCVWorker.ResultCallb
 	     reddot = (ImageView) dotView.findViewById(R.id.red);
 	     yellowdot = (ImageView) dotView.findViewById(R.id.yellow);
 	     
-	     //overlayFramelayout.addView(gv, new LayoutParams(500,200));
+	     overlayFramelayout.addView(gv, new LayoutParams(500,200));
 	     //addContentView(gv, new LayoutParams(500,200));
 	     
 	     pedometer = new Pedometer(this,reddot);
 	     //pedometer.redDot = reddot;
 	     pedometer.exampleSeries = exampleSeries;
 	     pedometer.gyroSeries = gyroSeries;
-	     pedometer.compassTextBox = compassTB;
-	     pedometer.testTextBox2 = magnetTxtView;	     
+	     pedometer.compassTextBox = gyroTxtView;
+	     pedometer.testTextBox2 = accTxtView;	     
 	     pedometer.start();	     
 	     	
 	     
@@ -353,8 +362,9 @@ public class OpenCVTutorial extends Activity implements OpenCVWorker.ResultCallb
         addContentView(gv, new LayoutParams(500,200));
          */
         
-        compass.start();      
+        //compass.start();      
         pedometer.start();
+        sd.startSensor();
       }
 
     @Override
@@ -372,8 +382,9 @@ public class OpenCVTutorial extends Activity implements OpenCVWorker.ResultCallb
         glView.onPause();
         //mSensorManager.unregisterListener(this);
        
-        compass.stop();
+        //compass.stop();
         pedometer.stop();
+        sd.startSensor();
     }
 
   //**************************************************************************** BUTTONS
@@ -394,8 +405,8 @@ public class OpenCVTutorial extends Activity implements OpenCVWorker.ResultCallb
     	View.OnClickListener btnStopHandler = new View.OnClickListener() {			
 			@Override
 			public void onClick(View v) {
-				compass.stopFlag = true;	
-				compass.startFlag = false;
+				//compass.stopFlag = true;	
+				//compass.startFlag = false;
 				compass.isFirstSet = true;
 
 				//pedometer.stopFlag = true;	
@@ -410,6 +421,11 @@ public class OpenCVTutorial extends Activity implements OpenCVWorker.ResultCallb
 			@Override
 			public void onClick(View v) {
 				pedometer.stepCounter = 0;
+				  StrictMode.setThreadPolicy(new StrictMode.ThreadPolicy.Builder()
+				  .detectDiskReads().detectDiskWrites().detectNetwork() // StrictMode is most commonly used to catch accidental disk or network access on the application's main thread
+				  .penaltyLog().build());
+				  
+				  pedometer.getHTTPdata(123456);
 				Toast.makeText(getBaseContext(), "Step counter reseted...", Toast.LENGTH_SHORT).show();			
 			}
 		};

@@ -9,6 +9,8 @@ import java.io.OutputStreamWriter;
 import java.io.PrintWriter;
 import java.math.RoundingMode;
 import java.text.DecimalFormat;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Timer;
 import java.util.TimerTask;
 
@@ -108,7 +110,7 @@ public class Compass implements SensorEventListener {
         DecimalFormat d = new DecimalFormat("#.##");
         
         // ********************************************************************************************
-        public Compass(Context context, TextView tv,GraphView gv, GraphViewSeries series) {
+        public Compass(Context context,GraphView gv, GraphViewSeries series) {
         	
         	this.context = context;
         	this.gv = gv;
@@ -117,8 +119,7 @@ public class Compass implements SensorEventListener {
         	//this.imgView = iv;
         	//arrowView = (ImageView) imgView.findViewById(R.id.radar);
         	
-        	compassTextBox = tv;
-        	compassTextBox.setText("compas azimuth");
+        	
             sensorManager = (SensorManager) context
                             .getSystemService(Context.SENSOR_SERVICE);
             accSensor = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
@@ -140,6 +141,11 @@ public class Compass implements SensorEventListener {
             d.setRoundingMode(RoundingMode.HALF_UP);
             d.setMaximumFractionDigits(2);
             d.setMinimumFractionDigits(2);
+
+            mIndoorTrackSettings = new SharedValue();
+            
+            swSize = mIndoorTrackSettings.getSensitivity();
+    		stepCount = 0;
         }
 
         public void start() {
@@ -149,6 +155,8 @@ public class Compass implements SensorEventListener {
                                 SensorManager.SENSOR_DELAY_FASTEST);
                 sensorManager.registerListener(this, msensor,
                                 SensorManager.SENSOR_DELAY_FASTEST);
+        
+            	compassTextBox.setText("Compass started. Steps: "+stepCount);  	
         }
 
         public void stop() {
@@ -165,7 +173,7 @@ public class Compass implements SensorEventListener {
                                 Animation.RELATIVE_TO_SELF, 0.5f, Animation.RELATIVE_TO_SELF,
                                 0.5f);
                         
-                compassTextBox.setText("Image az: "+azimuth);
+               // compassTextBox.setText("Image az: "+azimuth);
                 currectAzimuth = azimuth;
                         
                 
@@ -257,12 +265,33 @@ public class Compass implements SensorEventListener {
                 
             	//**************************************************************************************
 
-                ax = ax + lowPassFilterAlpha  * (accel[0] - ax);
-                ay = ay + lowPassFilterAlpha  * (accel[1] - ay);
-                az = az + lowPassFilterAlpha  * (accel[2] - az);
+                ax = lowPassFilterAlpha * ax + (1 - lowPassFilterAlpha) * accel[0];
+                ay = lowPassFilterAlpha * ay + (1 - lowPassFilterAlpha) * accel[1];            
+                az = lowPassFilterAlpha * az + (1 - lowPassFilterAlpha) * accel[2];            
                 
-                accVectValue = (float)Math.sqrt((ax*ax)+(ay*ay)+(az*az));
+                accVectValue = (float)Math.sqrt((ax*ax)+(ay*ay)+(az*az));   
+                float[] tempAcc = { ax, ay, az};
+                
+                // *********************************************************************** checkForStep
+        		accelList.add(tempAcc);
 
+        		float[] tempGyroOrientation = new float[3];
+        		System.arraycopy(fusedOrientation, 0, tempGyroOrientation, 0, 3);
+        		gyroOrientationList.add(tempGyroOrientation);
+        		
+        		
+        		if(gyroOrientationList.size() > swSize) {
+  
+       				checkForStep(gyroOrientationList);
+        		
+        			for(int i = 0; i < swSize - 35; i++) {
+        				accelList.remove(0);
+        				gyroOrientationList.remove(0);
+        			}
+        		}
+        		
+        		
+                //*************************************************************************************
                 if(startFlag)
                 {                	
 	                if (isFirstSet) {
@@ -299,8 +328,9 @@ public class Compass implements SensorEventListener {
                           	
             	mHandler.post(new Runnable() {
 	                    public void run() {
-	                    	testTextBox2.setText("sample: "+index);
-	                    	//adjustArrow();
+	                    	exampleSeries.appendData(new GraphViewData(graphIndex, accVectValue), true, 1024);
+	                    	//testTextBox2.setText("sample: "+index);
+	                    	adjustArrow();
 	                    	testTextBox.setText("filter: "+d.format(azimuth));
 	                       // graphIndex++; 
 	                    }
@@ -332,117 +362,6 @@ public class Compass implements SensorEventListener {
                 System.arraycopy(event.values, 0, magnet, 0, 3);
                 break;
             }
-            
-/*            
-                final float alpha = 0.97f;
-               // compassTextBox.setText("");
-                synchronized (this) {
-                        if (event.sensor.getType() == Sensor.TYPE_ACCELEROMETER) {
-
-                                mGravity[0] = alpha * mGravity[0] + (1 - alpha)
-                                                * event.values[0];
-                                mGravity[1] = alpha * mGravity[1] + (1 - alpha)
-                                                * event.values[1];
-                                mGravity[2] = alpha * mGravity[2] + (1 - alpha)
-                                                * event.values[2];
-
-                                accVectValue3 = (float)Math.sqrt((mGravity[0]*mGravity[0])+(mGravity[1]*mGravity[1])+(mGravity[2]*mGravity[2]));
-                                //fftData[fftIndex] = accVectValue;
-                                accVectValue = (float)Math.sqrt((event.values[0]*event.values[0])+(event.values[1]*event.values[1])+(event.values[2]*event.values[2]));
-                                
-                                accVectValue2 = alpha * accVectValue2 + (1 - alpha) * accVectValue;
-                                // mGravity = event.values;
-
-                                // Log.e(TAG, Float.toString(mGravity[0]));
-                        }
-
-                        if (event.sensor.getType() == Sensor.TYPE_MAGNETIC_FIELD) {
-                                // mGeomagnetic = event.values;
-
-                                mGeomagnetic[0] = alpha * mGeomagnetic[0] + (1 - alpha)
-                                                * event.values[0];
-                                mGeomagnetic[1] = alpha * mGeomagnetic[1] + (1 - alpha)
-                                                * event.values[1];
-                                mGeomagnetic[2] = alpha * mGeomagnetic[2] + (1 - alpha)
-                                                * event.values[2];
-                                // Log.e(TAG, Float.toString(event.values[0]));
-
-                        }
-                        
-                        if(event.sensor.getType() == Sensor.TYPE_GYROSCOPE){
-                        	System.arraycopy(event.values, 0, mGyro, 0, 3);
-                        }
-                        	
-
-                        float R[] = new float[9];
-                        float I[] = new float[9];
-                        boolean success = SensorManager.getRotationMatrix(R, I, mGravity,
-                                        mGeomagnetic);
-                        if (success) {
-                                float orientation[] = new float[3];
-                                SensorManager.getOrientation(R, orientation);
-                                // Log.d(TAG, "azimuth (rad): " + azimuth);
-                                azimuth = (float) Math.toDegrees(orientation[0]); // orientation
-                                //compassTextBox.append("a1: "+azimuth);
-                                azimuth = (azimuth + 360) % 360;
-                                testTextBox2.setText("normal: "+azimuth);
-                                // Log.d(TAG, "azimuth (deg): " + azimuth);
-                                adjustArrow();
-                        }
-                }*/
-/*                
-                if (isFirstSet) {
-                    startTime = System.currentTimeMillis();
-                    isFirstSet = false;
-                }
-           
-                currentTime = System.currentTimeMillis();
-                
-                if(startFlag)
-                {
-	                if (isFirstSet) {
-	                    startTime = System.currentTimeMillis();
-	                    isFirstSet = false;
-	                }
-	                currentTime = System.currentTimeMillis();
-	                if(index < 2)
-	                {
-	                	index++;
-	                }
-	                else
-	                {	      
-	                	
-	                	index=0;
-	                	if (!stopFlag) {
-	                        save();                      
-	                    }
-	                    else {
-	                        try {
-	                            myOutWriter.close();
-	                        } catch (IOException e) {
-	                            // TODO Auto-generated catch block
-	                            e.printStackTrace();
-	                        } catch (NullPointerException e) {
-	                            // TODO Auto-generated catch block
-	                            e.printStackTrace();
-	                        }
-	                        try {
-	                            fOut.close();
-	                        } catch (IOException e) {
-	                            // TODO Auto-generated catch block
-	                            e.printStackTrace();
-	                        } catch (NullPointerException e) {
-	                            // TODO Auto-generated catch block
-	                            e.printStackTrace();
-	                        }
-	                    }	                	
-                	}
-                }                             
-                
-                exampleSeries.appendData(new GraphViewData(graphIndex, accVectValue), true, 1024);
-                graphIndex++;
-                fftIndex++;
-*/
         }
 
         @Override
@@ -583,5 +502,83 @@ public class Compass implements SensorEventListener {
          
             return result;
         }
+
+//******************************************************************************************** step detect
+        SharedValue mIndoorTrackSettings;
+        
+    	private static final int BLOCKSIZE = 8; // Threshold continuous or continuous 0 1
+    	private int stepCount; // Detecting the number of footsteps
+    	private double stepLength; //step
+    	private boolean STEPDETECTED = false; // Footstep detection flag
+    	private double priOrientation = 0f; // Previous step in the direction
+    	
+
+    	private final static boolean FIXED_STEP_LENGTH = true;
+    	private final static int HAND_HELD = 1;
+    	private final static int TROUSER_POCKET = 2;
+    	
+    	private int swSize; // Sliding window size
+    	private static final int W = 15; // Local window size, used to calculate the local mean and the variance of the acceleration
+    	
+    	private List<float[]> accelList = new ArrayList<float[]>(); // Acceleration list
+    	private List<float[]> orientationList = new ArrayList<float[]>(); // Magnetometer direction list
+    	private List<float[]> gyroOrientationList = new ArrayList<float[]>(); // Gyro direction list
+    	
+        private void checkForStep(List<float[]> orientationList) {
+   		
+    		List<Float> magnitudeOfAccel = StepDetectionUtil.getMagnitudeOfAccel(accelList);
+    		List<Float> localMeanAccel = StepDetectionUtil.getLocalMeanAccel(magnitudeOfAccel, W);
+    		float threshold = StepDetectionUtil.getAverageLocalMeanAccel(localMeanAccel) + 0.5f;
+    		List<Integer> condition = StepDetectionUtil.getCondition(localMeanAccel, threshold);
+    		
+    		int numOne = 0; // Records to determine the condition condition, the number of consecutive 1
+    		int numZero = 0; // Records to determine the condition condition, the number of consecutive 0
+    		boolean flag = false; // Record the current point is 1 or 0
+    		
+    		for(int i = 0, j = 1; i < swSize - 1 && j < swSize - W; i++, j++) {
+    			flag = StepDetectionUtil.isOne(condition.get(i)); // Analyzing the condition before sample point i determine whether a
+    			if((condition.get(i) == condition.get(j)) && flag == true) 
+    			{				
+    				numOne++;
+    			}
+
+    			if((condition.get(i) == condition.get(j)) && flag == false) 
+    			{
+    				numZero++;	
+    			}
+
+    			if((condition.get(i) != condition.get(j)) && j > W && j < swSize - W) {
+    				if(numOne > BLOCKSIZE && numZero > BLOCKSIZE) {
+    					STEPDETECTED = true;
+    					stepCount++;
+    					float meanA = StepDetectionUtil.getMean(localMeanAccel, j, W);
+    					
+    					if(!mIndoorTrackSettings.getStepLengthMode() == FIXED_STEP_LENGTH)
+    						{
+    						stepLength = StepDetectionUtil.getSL(0.33f, meanA);
+    						}
+    					else stepLength = mIndoorTrackSettings.getStepLength() / 100f;
+    					
+    					double meanOrientation = 0;
+    					meanOrientation = StepDetectionUtil.getMeanOrientation(numOne, numZero, j, 
+    							orientationList, mIndoorTrackSettings.getPhonePosition(), mIndoorTrackSettings.getAlgorithms());
+    					
+    					priOrientation = meanOrientation;
+
+    	      			mHandler.post(new Runnable() {
+    	                    public void run() {
+    	                    	compassTextBox.setText("in F steps: "+stepCount);
+    	                    }
+         	           });
+    					  					
+    					
+    					numOne = 0;
+    					numZero = 0;
+    				}
+    			}
+    		}
+    		
+    	}
+
 }
  
