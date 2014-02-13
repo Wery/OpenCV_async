@@ -1,5 +1,7 @@
 package com.example.opencv_async;
 
+import java.math.RoundingMode;
+import java.text.DecimalFormat;
 import java.util.ArrayList;
 import java.util.Timer;
 import java.util.TimerTask;
@@ -33,6 +35,8 @@ public class Pedometer implements SensorEventListener {
 	float gyroVectValue;
 	public float[] accel;
 	public float[] gyro;
+	public float[] magnet;
+	
 	public static final int TIME_CONSTANT = 30;
     float lowPassFilterAlpha = 0.3f;
 	float ax,ay,az;
@@ -56,6 +60,7 @@ public class Pedometer implements SensorEventListener {
     private SensorManager sensorManager;
     private Sensor accSensor;
     private Sensor gyroSensor;
+    private Sensor magnetSensor;
     
     public TextView compassTextBox = null;
     public TextView testTextBox2 = null;
@@ -69,10 +74,8 @@ public class Pedometer implements SensorEventListener {
     
     //public Drawing drawView;
     
-    private static final Classifier classifier = new Classifier();
-    
+     
     String returnString;
-    
     SharedValue sv;
     
     public void getHTTPdata(int id){
@@ -128,16 +131,25 @@ public class Pedometer implements SensorEventListener {
                 .getSystemService(Context.SENSOR_SERVICE);
 		accSensor = sensorManager.getDefaultSensor(Sensor.TYPE_LINEAR_ACCELERATION);
 		//gyroSensor = sensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE);
+		magnetSensor = sensorManager.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD);
 		
-		fuseTimer.scheduleAtFixedRate(new calculateFusedOrientationTask(),
-                1000, TIME_CONSTANT);
+		//fuseTimer.scheduleAtFixedRate(new calculateFusedOrientationTask(), 1000, TIME_CONSTANT);
 		
 		accel = new float[3];
 		//gyro = new float[3];
+		magnet = new float[3];
 		
 		this.redDot = dot;
 		
 		sv = new SharedValue();
+		
+		d.setRoundingMode(RoundingMode.HALF_UP);
+        d.setMaximumFractionDigits(2);
+        d.setMinimumFractionDigits(2);
+        
+        matrixR = new float[9];
+        matrixI = new float[9];
+        matrixValues = new float[3];
 	}
 	
 	public void setAlpha(float a){
@@ -177,7 +189,7 @@ public class Pedometer implements SensorEventListener {
             //gy = lowPassFilterAlpha * gy + (1 - lowPassFilterAlpha) * gyro[1];            
             //gz = lowPassFilterAlpha * gz + (1 - lowPassFilterAlpha) * gyro[2]; 
         	
-            gyroVectValue = (float)Math.sqrt((gx*gx)+(gy*gy)+(gz*gz));                   
+         //   gyroVectValue = (float)Math.sqrt((gx*gx)+(gy*gy)+(gz*gz));                   
             
         	mHandler.post(new Runnable() {
                     public void run() {
@@ -202,25 +214,49 @@ public class Pedometer implements SensorEventListener {
 	public void onAccuracyChanged(Sensor arg0, int arg1) {
 	}
 
+	 private float[] matrixR;
+	 private float[] matrixI;
+	 private float[] matrixValues;
+	 private float azimuth = 0f;
+	 DecimalFormat d = new DecimalFormat("#.##");
+	 
+	 
 	@Override
 	public void onSensorChanged(SensorEvent event) {
     	switch(event.sensor.getType()) {
         case Sensor.TYPE_LINEAR_ACCELERATION:
         	System.arraycopy(event.values, 0, accel, 0, 3);
         	break;
-      //  case Sensor.TYPE_GYROSCOPE:
-        	//Log.e("GYRO", "GYRO DATA COLLECTED !!!");
-     //   	System.arraycopy(event.values, 0, gyro, 0, 3);
-      //  	break;
+        case Sensor.TYPE_MAGNETIC_FIELD:
+        	System.arraycopy(event.values, 0, magnet, 0, 3);
+        	break;	
     	}
+    	
+    	/*
+	    if(SensorManager.getRotationMatrix(matrixR, matrixI, accel, magnet)) {
+	        SensorManager.getOrientation(matrixR, matrixValues);
+	        azimuth = (float) Math.toDegrees(matrixValues[0]); // orientation
+            azimuth = (azimuth + 360) % 360;
+           	compassTextBox.setText("=>azimuth: "+d.format(azimuth));
+	    }*/
+	    
+    	ax = lowPassFilterAlpha * ax + (1 - lowPassFilterAlpha) * accel[0];
+        ay = lowPassFilterAlpha * ay + (1 - lowPassFilterAlpha) * accel[1];            
+        az = lowPassFilterAlpha * az + (1 - lowPassFilterAlpha) * accel[2];            
+        
+        accVectValue = (float)Math.sqrt((ax*ax)+(ay*ay)+(az*az));      
+        
+        exampleSeries.appendData(new GraphViewData(graphIndex, accVectValue), true, 1024);
+    	//gyroSeries.appendData(new GraphViewData(graphIndex, gyroVectValue), true, 1024);
+        graphIndex++; 
 	}
 	
 
     public void start() {
     		sensorManager.registerListener(this, accSensor,
     						SensorManager.SENSOR_DELAY_FASTEST);
-    		//sensorManager.registerListener(this, gyroSensor,
-			//				SensorManager.SENSOR_DELAY_FASTEST);
+    		sensorManager.registerListener(this, magnetSensor,
+							SensorManager.SENSOR_DELAY_FASTEST);
     		
     		x = redDot.getLeft();
             y = redDot.getTop();

@@ -136,6 +136,7 @@ public class OpenCVTutorial extends Activity implements OpenCVWorker.ResultCallb
     
     private Compass compass;
     StepDetection sd;
+    LinearAccelerationSensor linAcc;
     
     class WifiReceiver extends BroadcastReceiver { 
     	public void onReceive(Context c, Intent intent) { 
@@ -250,27 +251,39 @@ public class OpenCVTutorial extends Activity implements OpenCVWorker.ResultCallb
 	     stopBtn = (Button) findViewById(R.id.btn_stop);
 	     resetBtn = (Button) findViewById(R.id.reset);
 	     
-	     accTxtView = (TextView) findViewById(R.id.textView1); 
+	     accTxtView = (TextView) findViewById(R.id.txtAssoc); 
 	     gyroTxtView = (TextView) findViewById(R.id.gyro); 
 	     magnetTxtView = (TextView) findViewById(R.id.magnetometer); 	     
 	     wifiTB = (TextView) findViewById(R.id.wifiTB); 
 	     compassTB = (TextView) findViewById(R.id.textView4);
 	     textview = (TextView) findViewById(R.id.textView3);
-	     tv = (TextView) findViewById(R.id.textView2);
-	     	     
-	     //compass = new Compass(this,gv,exampleSeries);
-	     //compass.compassTextBox = compassTB;
-	     //compass.testTextBox = tv;
-	     //compass.testTextBox2 = magnetTxtView;
-	     //compass.arrowView = comapsImage;
-	     //compass.start();
+	     tv = (TextView) findViewById(R.id.txtScanner);
 	     
-	     sd = new StepDetection(this);
+	     
+	     compass = new Compass(this,gv,exampleSeries);
+	     compass.compassTextBox = compassTB;
+	     compass.testTextBox = tv;
+	     compass.gyroTxtView = gyroTxtView;
+	     compass.testTextBox2 = magnetTxtView;
+	     compass.arrowView = comapsImage;
+	     compass.start();
+	     
+	   /*  sd = new StepDetection(this);
 	     sd.tv = tv;
 	     sd.compassTB = compassTB;
-	     
+	     sd.magnetTxtView = magnetTxtView;
 	     sd.startSensor();
+	     */
 	     
+	     /*
+	     linAcc = new LinearAccelerationSensor(this);
+	     linAcc.exampleSeries = exampleSeries;
+	     linAcc.testTextBox = tv;
+	     linAcc.gyroTxtView = gyroTxtView;
+	     linAcc.testTextBox2 = magnetTxtView;
+	     linAcc.arrowView = comapsImage;
+	     linAcc.start();
+	    */
 	     //inflaterGraph = (LayoutInflater)this.getSystemService(Context.LAYOUT_INFLATER_SERVICE);//LayoutInflater.from(this);
 	     //dotView = inflater.inflate(R.layout.dot,null);
 	     dotView = inflater.inflate(R.layout.dotlayout, overlayFramelayout,false);
@@ -283,6 +296,7 @@ public class OpenCVTutorial extends Activity implements OpenCVWorker.ResultCallb
 	     overlayFramelayout.addView(gv, new LayoutParams(500,200));
 	     //addContentView(gv, new LayoutParams(500,200));
 	     
+	     /*
 	     pedometer = new Pedometer(this,reddot);
 	     //pedometer.redDot = reddot;
 	     pedometer.exampleSeries = exampleSeries;
@@ -290,7 +304,7 @@ public class OpenCVTutorial extends Activity implements OpenCVWorker.ResultCallb
 	     pedometer.compassTextBox = gyroTxtView;
 	     pedometer.testTextBox2 = accTxtView;	     
 	     pedometer.start();	     
-	     	
+	     	*/
 	     
 	     //mCustomDrawableView = new CustomDrawableView(this);
 	     //setContentView(mCustomDrawableView); 
@@ -313,7 +327,9 @@ public class OpenCVTutorial extends Activity implements OpenCVWorker.ResultCallb
     
 	     initButtons();
 	     draw = new Drawing(this);
-	     overlayFramelayout.addView(draw);	     
+	     overlayFramelayout.addView(draw);	
+	     
+	     
     }  
        
     @Override
@@ -362,9 +378,10 @@ public class OpenCVTutorial extends Activity implements OpenCVWorker.ResultCallb
         addContentView(gv, new LayoutParams(500,200));
          */
         
-        //compass.start();      
-        pedometer.start();
-        sd.startSensor();
+        compass.start();      
+       // pedometer.start();
+       // sd.startSensor();
+        //linAcc.start();
       }
 
     @Override
@@ -382,9 +399,10 @@ public class OpenCVTutorial extends Activity implements OpenCVWorker.ResultCallb
         glView.onPause();
         //mSensorManager.unregisterListener(this);
        
-        //compass.stop();
-        pedometer.stop();
-        sd.startSensor();
+        compass.stop();
+      //  pedometer.stop();
+       // sd.startSensor();
+        //linAcc.stop();
     }
 
   //**************************************************************************** BUTTONS
@@ -394,10 +412,13 @@ public class OpenCVTutorial extends Activity implements OpenCVWorker.ResultCallb
 			@Override
 			public void onClick(View v) {
 				compass.startFlag = true;
-				compass.stopFlag = false;
+			    compass.stopFlag = false;
 				
 				//pedometer.startFlag = true;
 				//pedometer.stopFlag = false;
+				
+				//linAcc.startFlag = true;
+				//linAcc.stopFlag = false;
 				Toast.makeText(getBaseContext(), "Start logging...", Toast.LENGTH_SHORT).show();			
 			}
 		};
@@ -405,27 +426,36 @@ public class OpenCVTutorial extends Activity implements OpenCVWorker.ResultCallb
     	View.OnClickListener btnStopHandler = new View.OnClickListener() {			
 			@Override
 			public void onClick(View v) {
-				//compass.stopFlag = true;	
-				//compass.startFlag = false;
+				compass.stopFlag = true;	
+				compass.startFlag = false;
 				compass.isFirstSet = true;
 
 				//pedometer.stopFlag = true;	
 				//pedometer.startFlag = false;
 				//pedometer.isFirstSet = true;
+				
+				//linAcc.stopFlag = true;	
+				//linAcc.startFlag = false;
+				//linAcc.isFirstSet = true;
 				Toast.makeText(getBaseContext(), "Stop logging...", Toast.LENGTH_SHORT).show();			
 			}
-		};
-		
+		};		
 		
     	View.OnClickListener btnResetHandler = new View.OnClickListener() {			
 			@Override
 			public void onClick(View v) {
-				pedometer.stepCounter = 0;
-				  StrictMode.setThreadPolicy(new StrictMode.ThreadPolicy.Builder()
+				//compass.stepCount = 0;
+				compass.resetData();
+				///linAcc.stepCount = 0;
+				//textview.setText("alpha: " + linAcc.getAlpha());
+				compass.compassTextBox.setText("steps: "+compass.stepCounter);
+				
+				/*
+				StrictMode.setThreadPolicy(new StrictMode.ThreadPolicy.Builder()
 				  .detectDiskReads().detectDiskWrites().detectNetwork() // StrictMode is most commonly used to catch accidental disk or network access on the application's main thread
 				  .penaltyLog().build());
 				  
-				  pedometer.getHTTPdata(123456);
+				  pedometer.getHTTPdata(123456);*/
 				Toast.makeText(getBaseContext(), "Step counter reseted...", Toast.LENGTH_SHORT).show();			
 			}
 		};
@@ -433,8 +463,11 @@ public class OpenCVTutorial extends Activity implements OpenCVWorker.ResultCallb
 		alphaSeekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
 		        public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser){
 		            //Do something here with new value
-		        	pedometer.setAlpha((float)((float)progress/(float)100));
-		        	textview.setText("alpha: " + pedometer.getAlpha());
+		        	compass.setAlpha((float)((float)progress/(float)100));
+		        	textview.setText("alpha: " + compass.getAlpha());		        	
+		        	//pedometer.setAlpha((float)((float)progress/(float)100));
+		        	//linAcc.setAlpha((float)((float)progress/(float)100));
+		        	//textview.setText("alpha: " + linAcc.getAlpha());
 		        }
 
 				public void onStartTrackingTouch(SeekBar arg0) {
@@ -462,8 +495,8 @@ public class OpenCVTutorial extends Activity implements OpenCVWorker.ResultCallb
         menu.add(Menu.NONE, Menu.FIRST, Menu.NONE, "color / bw");
         menu.add(Menu.NONE, Menu.FIRST+1, Menu.NONE, "threshold type");
         menu.add(Menu.NONE, Menu.FIRST+2, Menu.NONE, "canny");
-        menu.add(Menu.NONE, Menu.FIRST+3, Menu.NONE, "wifi");
-        
+        menu.add(Menu.NONE, Menu.FIRST+3, Menu.NONE, "pekas");
+        menu.add(Menu.NONE, Menu.FIRST+4, Menu.NONE, "wifi");
         return true;
     }
 
@@ -486,9 +519,16 @@ public class OpenCVTutorial extends Activity implements OpenCVWorker.ResultCallb
             return true;
             case 4:
             	Log.i("MENU", "onOptionsItemSelected; selected item: " + item);
-            	wifiInfo();
+            	//wifiInfo();
+            	Intent myIntent = new Intent(OpenCVTutorial.this, PedometerTest.class);
+            	OpenCVTutorial.this.startActivity(myIntent);
             return true;
-            
+            case 5:
+            	Log.i("MENU", "onOptionsItemSelected; selected item: " + item);
+            	//wifiInfo();
+            	Intent wifiIntent = new Intent(OpenCVTutorial.this, WifiScanner.class);
+            	OpenCVTutorial.this.startActivity(wifiIntent);
+            return true;
         default:
             return super.onOptionsItemSelected(item);
         }              

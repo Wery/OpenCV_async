@@ -1,5 +1,6 @@
 package com.example.opencv_async;
 
+import java.text.DecimalFormat;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -29,6 +30,7 @@ public class StepDetection {
 	/* ----------------------------------------------*/
 	//  Parameters checkForStep Method
 	private float[] accel = new float[3]; // Instantaneous acceleration
+	private float[] magnet = new float[3]; // Instantaneous acceleration
 	private float[] orientation = new float[3]; // Instantaneous magnetometer direction
 	private List<float[]> accelList = new ArrayList<float[]>(); // Acceleration list
 	private List<float[]> orientationList = new ArrayList<float[]>(); // Magnetometer direction list
@@ -95,6 +97,8 @@ public class StepDetection {
 	
 	public TextView tv = null;
 	public TextView compassTB = null;
+	public TextView magnetTxtView = null;
+	
 	
 	public StepDetection(Context context) {
 		// TODO Auto-generated constructor stub
@@ -117,6 +121,11 @@ public class StepDetection {
 	/**
 	 * Processing sensor events
 	 */
+	 private float[] matrixR  = new float[9];
+	 private float[] matrixI = new float[9];
+	 private float[] matrixValues = new float[3];
+	 private float azimuth = 0f;
+	 DecimalFormat d = new DecimalFormat("#.##");
 	public SensorEventListener mSensorEventListener = new SensorEventListener() {
 		
 		@SuppressWarnings("deprecation")
@@ -134,13 +143,25 @@ public class StepDetection {
 		    case Sensor.TYPE_ORIENTATION:
 		    	System.arraycopy(event.values, 0, orientation, 0, 3);
 		    	break;
+		    	
+		    case Sensor.TYPE_MAGNETIC_FIELD:
+		    	System.arraycopy(event.values, 0, magnet, 0, 3);
+		    	break;
 			}
+	
+			if(SensorManager.getRotationMatrix(matrixR, matrixI, accel, magnet)) {
+		        SensorManager.getOrientation(matrixR, matrixValues);
+		        azimuth = (float) Math.toDegrees(matrixValues[0]); // orientation
+	            azimuth = (azimuth + 360) % 360;
+	            magnetTxtView.setText("=>azimuth: "+d.format(azimuth));
+		    }
 		}
 		
 		@Override
 		public void onAccuracyChanged(Sensor sensor, int accuracy) {
 			
 		}
+
 	};
 	
 	/**
@@ -161,6 +182,9 @@ public class StepDetection {
 				mSensorManager.getDefaultSensor(Sensor.TYPE_ORIENTATION),
 				SensorManager.SENSOR_DELAY_FASTEST);
 		
+		mSensorManager.registerListener(mSensorEventListener, 
+				mSensorManager.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD),
+				SensorManager.SENSOR_DELAY_FASTEST);
 		
 		tv.setText("stepCount: OK");
     	compassTB.setText("azimuth: OK");

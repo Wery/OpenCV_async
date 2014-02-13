@@ -111,7 +111,7 @@ public class StepDetectionUtil {
 		float flag;
 		while (it.hasNext()) {
 			flag = it.next();
-			if (flag > threshold) {
+			if (flag > threshold && threshold > 0.5f) {
 				condition.add(1);
 			}
 			else {

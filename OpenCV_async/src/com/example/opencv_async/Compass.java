@@ -19,6 +19,7 @@ import android.hardware.Sensor;
 import android.hardware.SensorEvent;
 import android.hardware.SensorEventListener;
 import android.hardware.SensorManager;
+import android.os.AsyncTask;
 import android.os.Handler;
 import android.util.Log;
 import android.view.View;
@@ -27,6 +28,7 @@ import android.view.animation.RotateAnimation;
 import android.widget.ImageView;
 import android.widget.TextView;
 
+import com.example.opencv_async.PedometerTest.dataPoints;
 import com.jjoe64.graphview.GraphView;
 import com.jjoe64.graphview.GraphView.GraphViewData;
 import com.jjoe64.graphview.GraphViewSeries;
@@ -42,49 +44,35 @@ public class Compass implements SensorEventListener {
         private Sensor gsensor;
         private Sensor msensor;
         private Sensor accSensor;
+        private Sensor linAccSensor;
         
-        public static final int TIME_CONSTANT = 30;
+        public static final int TIME_CONSTANT = 20;
         public static final float FILTER_COEFFICIENT = 0.98f;
         private Timer fuseTimer = new Timer();
         
-        // angular speeds from gyro
         private float[] gyro = new float[3];
-     
-        // rotation matrix from gyro data
         private float[] gyroMatrix = new float[9];
-     
-        // orientation angles from gyro matrix
         private float[] gyroOrientation = new float[3];
      
-        // magnetic field vector
         private float[] magnet = new float[3];
-     
-        // accelerometer vector
         private float[] accel = new float[3];
-     
-        // orientation angles from accel and magnet
         private float[] accMagOrientation = new float[3];
      
-        // final orientation angles from sensor fusion
         private float[] fusedOrientation = new float[3];
      
-        // accelerometer and magnetometer based rotation matrix
         private float[] rotationMatrix = new float[9];
         
-        private float[] mGravity = new float[3];        
-        private float[] mGeomagnetic = new float[3];
-        private float[] mGyro = new float[3];  
+        private float[] linAccel = new float[3];  
         
         private float azimuth = 0f;
         private float currectAzimuth = 0;
-
-
         
         // compass arrow to rotate
         public ImageView arrowView = null;
         public TextView compassTextBox = null;
         public TextView testTextBox = null;
         public TextView testTextBox2 = null;
+        public TextView gyroTxtView = null;
 
         GraphView gv;
         GraphViewSeries exampleSeries;
@@ -99,6 +87,10 @@ public class Compass implements SensorEventListener {
         
         private long currentTime;
         private long startTime;
+        
+        private long actualTime;
+        private long firstStartTime;
+        
         boolean isFirstSet = true;
         
         boolean stopFlag = false;
@@ -125,7 +117,8 @@ public class Compass implements SensorEventListener {
             accSensor = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
             gsensor = sensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE);
             msensor = sensorManager.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD);
-                                           
+            linAccSensor = sensorManager.getDefaultSensor(Sensor.TYPE_LINEAR_ACCELERATION);
+            
             gyroOrientation[0] = 0.0f;
             gyroOrientation[1] = 0.0f;
             gyroOrientation[2] = 0.0f;
@@ -136,16 +129,18 @@ public class Compass implements SensorEventListener {
             gyroMatrix[6] = 0.0f; gyroMatrix[7] = 0.0f; gyroMatrix[8] = 1.0f;
             
             fuseTimer.scheduleAtFixedRate(new calculateFusedOrientationTask(),
-                    1000, TIME_CONSTANT);
+                   1000, TIME_CONSTANT);
             
             d.setRoundingMode(RoundingMode.HALF_UP);
             d.setMaximumFractionDigits(2);
             d.setMinimumFractionDigits(2);
 
             mIndoorTrackSettings = new SharedValue();
-            
-            swSize = mIndoorTrackSettings.getSensitivity();
-    		stepCount = 0;
+                       
+    		meanFilterLinearAcceleration = new MeanFilter();
+    		meanFilterAcceleration = new MeanFilter();
+    	    meanFilterMagnetic = new MeanFilter();
+    	    varianceAccel = new StdDev();	
         }
 
         public void start() {
@@ -155,26 +150,29 @@ public class Compass implements SensorEventListener {
                                 SensorManager.SENSOR_DELAY_FASTEST);
                 sensorManager.registerListener(this, msensor,
                                 SensorManager.SENSOR_DELAY_FASTEST);
-        
-            	compassTextBox.setText("Compass started. Steps: "+stepCount);  	
+                sensorManager.registerListener(this, linAccSensor,
+                        SensorManager.SENSOR_DELAY_FASTEST);
+            	compassTextBox.setText("Compass started...");  	
         }
 
         public void stop() {
         	sensorManager.unregisterListener(this);                
         }
 
-        private void adjustArrow() {
+
+        // ************************************************************************************ adjustArrow
+        private void adjustArrow(float dir) {
                 if (arrowView == null) {
                         Log.i(TAG, "arrow view is not set");
                         return;
                 }
          
-                Animation an = new RotateAnimation(-currectAzimuth, -azimuth,
+                Animation an = new RotateAnimation(-currectAzimuth, -dir,
                                 Animation.RELATIVE_TO_SELF, 0.5f, Animation.RELATIVE_TO_SELF,
                                 0.5f);
                         
                // compassTextBox.setText("Image az: "+azimuth);
-                currectAzimuth = azimuth;
+                currectAzimuth = dir;
                         
                 
                 an.setDuration(50);
@@ -183,6 +181,7 @@ public class Compass implements SensorEventListener {
                 arrowView.startAnimation(an);                                            
         }
 
+        // ********************************************************************************************
         public static final float EPSILON = 0.000000001f;
         
         private static final float NS2S = 1.0f / 1000000000.0f;
@@ -190,7 +189,7 @@ public class Compass implements SensorEventListener {
         private boolean initState = true;
          
        
-        final float lowPassFilterAlpha = 0.77f;
+        public float lowPassFilterAlpha = 0.01f;
     	float ax;
     	float ay;
     	float az;
@@ -198,69 +197,38 @@ public class Compass implements SensorEventListener {
         float accVectValue2 = 0f;
         float accVectValue3 = 0f;
         
+        float alx = 0f;
+        float aly = 0f;            
+        float alz = 0f;
+        float accLinVectValue = 0f;
+        
         GraphViewData[] graphData = new GraphViewData[1024];
         private int graphIndex=0;
         private int index=0;
         long lastTime=0;
         
-       	class calculateFusedOrientationTask extends TimerTask {
+        float[] tmpAccel = new float[3];
+        float[] components = new float[3];
+        float[] absoluteFrameOrientation = new float[3];
+        float[] linearAcceleration = new float[3];
+        float newLinAccVectValue2 = 0f;
+        float newLinAccVectValue = 0f;
+        private MeanFilter meanFilterLinearAcceleration;
+      //**************************************************************************************** MAIN CALC 
+                
+         	class calculateFusedOrientationTask extends TimerTask {
+        
             public void run() {
-
-                float oneMinusCoeff = 1.0f - FILTER_COEFFICIENT;
-                
-                /*
-                 * Fix for 179° <--> -179° transition problem:
-                 * Check whether one of the two orientation angles (gyro or accMag) is negative while the other one is positive.
-                 * If so, add 360° (2 * math.PI) to the negative value, perform the sensor fusion, and remove the 360° from the result
-                 * if it is greater than 180°. This stabilizes the output in positive-to-negative-transition cases.
-                 */
-                
-                // azimuth
-                if (gyroOrientation[0] < -0.5 * Math.PI && accMagOrientation[0] > 0.0) {
-                	fusedOrientation[0] = (float) (FILTER_COEFFICIENT * (gyroOrientation[0] + 2.0 * Math.PI) + oneMinusCoeff * accMagOrientation[0]);
-            		fusedOrientation[0] -= (fusedOrientation[0] > Math.PI) ? 2.0 * Math.PI : 0;
+                if(firstStartFlag)
+                {
+                	firstStartTime=System.currentTimeMillis();
+                	firstStartFlag=false;
+                	Log.e("GRAPH","first time set... " + firstStartTime);
                 }
-                else if (accMagOrientation[0] < -0.5 * Math.PI && gyroOrientation[0] > 0.0) {
-                	fusedOrientation[0] = (float) (FILTER_COEFFICIENT * gyroOrientation[0] + oneMinusCoeff * (accMagOrientation[0] + 2.0 * Math.PI));
-                	fusedOrientation[0] -= (fusedOrientation[0] > Math.PI)? 2.0 * Math.PI : 0;
-                }
-                else {
-                	fusedOrientation[0] = FILTER_COEFFICIENT * gyroOrientation[0] + oneMinusCoeff * accMagOrientation[0];
-                }
-                
-                // pitch
-                if (gyroOrientation[1] < -0.5 * Math.PI && accMagOrientation[1] > 0.0) {
-                	fusedOrientation[1] = (float) (FILTER_COEFFICIENT * (gyroOrientation[1] + 2.0 * Math.PI) + oneMinusCoeff * accMagOrientation[1]);
-            		fusedOrientation[1] -= (fusedOrientation[1] > Math.PI) ? 2.0 * Math.PI : 0;
-                }
-                else if (accMagOrientation[1] < -0.5 * Math.PI && gyroOrientation[1] > 0.0) {
-                	fusedOrientation[1] = (float) (FILTER_COEFFICIENT * gyroOrientation[1] + oneMinusCoeff * (accMagOrientation[1] + 2.0 * Math.PI));
-                	fusedOrientation[1] -= (fusedOrientation[1] > Math.PI)? 2.0 * Math.PI : 0;
-                }
-                else {
-                	fusedOrientation[1] = FILTER_COEFFICIENT * gyroOrientation[1] + oneMinusCoeff * accMagOrientation[1];
-                }
-                
-                // roll
-                if (gyroOrientation[2] < -0.5 * Math.PI && accMagOrientation[2] > 0.0) {
-                	fusedOrientation[2] = (float) (FILTER_COEFFICIENT * (gyroOrientation[2] + 2.0 * Math.PI) + oneMinusCoeff * accMagOrientation[2]);
-            		fusedOrientation[2] -= (fusedOrientation[2] > Math.PI) ? 2.0 * Math.PI : 0;
-                }
-                else if (accMagOrientation[2] < -0.5 * Math.PI && gyroOrientation[2] > 0.0) {
-                	fusedOrientation[2] = (float) (FILTER_COEFFICIENT * gyroOrientation[2] + oneMinusCoeff * (accMagOrientation[2] + 2.0 * Math.PI));
-                	fusedOrientation[2] -= (fusedOrientation[2] > Math.PI)? 2.0 * Math.PI : 0;
-                }
-                else {
-                	fusedOrientation[2] = FILTER_COEFFICIENT * gyroOrientation[2] + oneMinusCoeff * accMagOrientation[2];
-                }
-         
-                // overwrite gyro matrix and orientation with fused orientation
-                // to comensate gyro drift
-                gyroMatrix = getRotationMatrixFromOrientation(fusedOrientation);
-                System.arraycopy(fusedOrientation, 0, gyroOrientation, 0, 3);
-
+            	/*
+            	float[] tmpFusedorientation = calculateOrientation();
             	
-                azimuth = (float) Math.toDegrees(fusedOrientation[0]); // orientation
+                azimuth = (float) Math.toDegrees(tmpFusedorientation[0]); // orientation
                 azimuth = (azimuth + 360) % 360;
                 
             	//**************************************************************************************
@@ -276,110 +244,274 @@ public class Compass implements SensorEventListener {
         		accelList.add(tempAcc);
 
         		float[] tempGyroOrientation = new float[3];
-        		System.arraycopy(fusedOrientation, 0, tempGyroOrientation, 0, 3);
+        		System.arraycopy(tmpFusedorientation, 0, tempGyroOrientation, 0, 3);
         		gyroOrientationList.add(tempGyroOrientation);
-        		
-        		
-        		if(gyroOrientationList.size() > swSize) {
-  
-       				checkForStep(gyroOrientationList);
-        		
-        			for(int i = 0; i < swSize - 35; i++) {
-        				accelList.remove(0);
-        				gyroOrientationList.remove(0);
-        			}
-        		}
-        		
-        		
-                //*************************************************************************************
-                if(startFlag)
-                {                	
-	                if (isFirstSet) {
-	                    startTime = System.currentTimeMillis();
-	                    isFirstSet = false;
-	                 
-	    	            try {
-	    	            	myFile = new File("/sdcard/test/test-"+startTime+".txt");
-	    	            	myFile.createNewFile();
-	    	            	
-	    	            } catch (Exception e) {
-	    	            	Log.e("MAKE_FILE","make file error!");
-	    	            }
-	                }
-	                currentTime = System.currentTimeMillis();
-	                
-                	if (!stopFlag) {
-                        try {
-                        	index++;
-                        	myBufferedWriter = new BufferedWriter(new FileWriter(myFile, true));
-                            myBufferedWriter.append(currentTime - startTime + "," +
-                        			accel[0] + "," + accel[1] + "," + accel[2] + "," + 
-                            		azimuth + "," + accVectValue + "\r\n");                            
-                            myBufferedWriter.close();
-						} catch (IOException e) {
-							e.printStackTrace();
-						}                      
-                    }
-                    else {
-                    	index=0;                    	
 
-                    }	                	
-            	}                                                        
-                          	
+        		calculateLinearAcceleration(tmpFusedorientation);
+        		
+                //******************************************************************************* save to file
+                                            
+        		 //*************************************************************************************
             	mHandler.post(new Runnable() {
 	                    public void run() {
 	                    	exampleSeries.appendData(new GraphViewData(graphIndex, accVectValue), true, 1024);
 	                    	//testTextBox2.setText("sample: "+index);
-	                    	adjustArrow();
+	                    	//adjustArrow();
 	                    	testTextBox.setText("filter: "+d.format(azimuth));
-	                       // graphIndex++; 
+	                        graphIndex++; 
 	                    }
 	           });
-            	
+            	*/
             	//**************************************************************************************
+            	mHandler.post(new Runnable() {
+                    public void run() {
+//                    	linearAcceleration2 = calculate(acceleration, magnetic);
+                    	calculate(acceleration, magnetic); 
+                    }
+            	});            	
             }
         }
-        
+     
+       	
+       	//************************************************************************************************ 
+       	
     	@Override
         public void onSensorChanged(SensorEvent event) {
 
         	switch(event.sensor.getType()) {
             case Sensor.TYPE_ACCELEROMETER:
-                // copy new accelerometer data into accel array
-                // then calculate new orientation
+            	//System.arraycopy(event.values, 0, acceleration, 0, 3);            	
                 System.arraycopy(event.values, 0, accel, 0, 3);
+                acceleration = meanFilterAcceleration.filterFloat(accel);
                 calculateAccMagOrientation();
                 break;
          
             case Sensor.TYPE_GYROSCOPE:
-                // process gyro data
-            	//System.arraycopy(event.values, 0, gyro, 0, 3);
-                gyroFunction(event);
+                //gyroFunction(event);
                 break;
          
             case Sensor.TYPE_MAGNETIC_FIELD:
-                // copy new magnetometer data into magnet array
-                System.arraycopy(event.values, 0, magnet, 0, 3);
+            	System.arraycopy(event.values, 0, magnet, 0, 3);
+            	magnetic = meanFilterMagnetic.filterFloat(magnet);
+            	break;
+               
+            case Sensor.TYPE_LINEAR_ACCELERATION:
+                System.arraycopy(event.values, 0, linAccel, 0, 3);
                 break;
-            }
+            }        	
         }
 
         @Override
         public void onAccuracyChanged(Sensor sensor, int accuracy) {
         }
-        
-        
-        //************************************************************************************************ 
-     // calculates orientation angles from accelerometer and magnetometer output
-    	public void calculateAccMagOrientation() {
-    	    if(SensorManager.getRotationMatrix(rotationMatrix, null, accel, magnet)) {
-    	        SensorManager.getOrientation(rotationMatrix, accMagOrientation);
-    	    }
+
+        //************************************************************************************************        
+    	public void setAlpha(float a){
+    		this.lowPassFilterAlpha = a;	
     	}
     	
-    	// This function is borrowed from the Android reference
-    	// at http://developer.android.com/reference/android/hardware/SensorEvent.html#values
-    	// It calculates a rotation vector from the gyroscope angular speed values.
+    	public float getAlpha(){		
+    		return this.lowPassFilterAlpha;
+    	}
+        
+    	//************************************************************************************ saveToFile
+    	
+        public void saveToFile(float direction, float[] a, float accVect, float[] al, float accLinVect){
+            if(startFlag)
+            {                	
+                if (isFirstSet) {
+                    startTime = System.currentTimeMillis();
+                    isFirstSet = false;
+                 
+    	            try {
+    	            	myFile = new File("/sdcard/test/test-"+startTime+".txt");
+    	            	myFile.createNewFile();
+    	            	
+    	            } catch (Exception e) {
+    	            	Log.e("MAKE_FILE","make file error!");
+    	            }
+                }
+                currentTime = System.currentTimeMillis();
+                
+            	if (!stopFlag) {
+                    try {
+                    	index++;
+                    	myBufferedWriter = new BufferedWriter(new FileWriter(myFile, true));
+                        myBufferedWriter.append(currentTime - startTime + "," +
+                    			a[0] + "," + a[1] + "," + a[2] + "," +
+                    			//al[0] + "," + al[1] + "," + al[2] + "," + 
+                    			//direction + "," + 
+                    			//accVect + "," + 
+                    			accLinVect+ "\r\n");                            
+                        myBufferedWriter.close();
+					} catch (IOException e) {
+						e.printStackTrace();
+					}                      
+                }
+                else {
+                	index=0;                    	
+
+                }	
+            	
+            	gyroTxtView.setText("probka: "+index);
+        	}  
+        }
+    
+        public void saveToFile(float[] a, float accVect, long ctime){
+            if(startFlag)
+            {                	
+                if (isFirstSet) {
+                    //startTime = System.currentTimeMillis();
+                    isFirstSet = false;
+                 
+    	            try {
+    	            	//myFile = new File("/sdcard/test/test-"+startTime+".txt");
+    	            	myFile = new File("/sdcard/test/test-"+firstStartTime+".txt");
+    	            	myFile.createNewFile();
+    	            	
+    	            } catch (Exception e) {
+    	            	Log.e("MAKE_FILE","make file error!");
+    	            }
+                }
+                //currentTime = System.currentTimeMillis();
+                
+            	if (!stopFlag) {
+                    try {
+                    	index++;
+                    	myBufferedWriter = new BufferedWriter(new FileWriter(myFile, true));
+                    	//String s = (currentTime - startTime);
+
+                    	
+                    	//long diffTime = ctime - firstStartTime;
+                    	//Log.e("GRAPH","diffTime: "+diffTime);
+                    	//Log.e("GRAPH","ctime: "+ctime);
+                    	StringBuilder strB = new StringBuilder();
+                    	strB.append(ctime);
+                    	strB.append(",");
+                    	strB.append(a[0]);
+                    	strB.append(",");
+                    	strB.append(a[1]);
+                    	strB.append(",");
+                    	strB.append(a[2]);
+                    	strB.append(",");
+                    	strB.append(accVect);
+                    	strB.append("\r\n");
+                    	myBufferedWriter.append(strB);
+                        //myBufferedWriter.append(currentTime - startTime + "," +
+                    	//		a[0] + "," + a[1] + "," + a[2] + "," + accVect+ "\r\n");                            
+                        myBufferedWriter.close();
+    				} catch (IOException e) {
+    					e.printStackTrace();
+    				}                      
+                }
+                else {
+                	index=0;                    	
+
+                }	        	
+            	gyroTxtView.setText("probka: "+index);
+        	}  
+        }
+
+      //************************************************************************************************
+        float threshold = 0.08f;
+        
+        public float calcAzimutch(float fo){
+            azimuth = (float) Math.toDegrees(fo); // orientation
+            azimuth = (azimuth + 360) % 360;
+            return azimuth; 
+        }
+        
+        private List<float[]> accList = new ArrayList<float[]>();
+        float accLinVectValuelast = 0f;
+        boolean alphaStatic = false;
+        private float dt = 0;
+        private float timeConstant = 0.18f;
+        private float timestamp2;
+    	private float timestampOld;
+    	private int count = 0;
+    	private float alpha = 0.1f;
+    	
+    	float linX=0;
+    	float linY=0;
+    	float linZ=0;
+    	
+    	float gravityX=0;
+    	float gravityY=0;
+    	float gravityZ=0;
+    	float newLinAcc = 0f;
+    	
+        SharedValue mIndoorTrackSettings;
+    	private List<float[]> accelList = new ArrayList<float[]>(); // Acceleration list
+    	private List<float[]> gyroOrientationList = new ArrayList<float[]>(); // Gyro direction list
+  
+    	
+    	boolean isFirstRead = true;
+	     // simple low-pass filter
+    	
+        float lowPass(float current, float last)
+        {
+        	return last * (1.0f - lowPassFilterAlpha) + current * lowPassFilterAlpha;
+        }  
+             
+        public float[] calculateOrientation(){
+        
+        	float oneMinusCoeff = 1.0f - FILTER_COEFFICIENT;               
+            // azimuth
+            if (gyroOrientation[0] < -0.5 * Math.PI && accMagOrientation[0] > 0.0) {
+            	fusedOrientation[0] = (float) (FILTER_COEFFICIENT * (gyroOrientation[0] + 2.0 * Math.PI) + oneMinusCoeff * accMagOrientation[0]);
+        		fusedOrientation[0] -= (fusedOrientation[0] > Math.PI) ? 2.0 * Math.PI : 0;
+            }
+            else if (accMagOrientation[0] < -0.5 * Math.PI && gyroOrientation[0] > 0.0) {
+            	fusedOrientation[0] = (float) (FILTER_COEFFICIENT * gyroOrientation[0] + oneMinusCoeff * (accMagOrientation[0] + 2.0 * Math.PI));
+            	fusedOrientation[0] -= (fusedOrientation[0] > Math.PI)? 2.0 * Math.PI : 0;
+            }
+            else {
+            	fusedOrientation[0] = FILTER_COEFFICIENT * gyroOrientation[0] + oneMinusCoeff * accMagOrientation[0];
+            }
+            
+            // pitch
+            if (gyroOrientation[1] < -0.5 * Math.PI && accMagOrientation[1] > 0.0) {
+            	fusedOrientation[1] = (float) (FILTER_COEFFICIENT * (gyroOrientation[1] + 2.0 * Math.PI) + oneMinusCoeff * accMagOrientation[1]);
+        		fusedOrientation[1] -= (fusedOrientation[1] > Math.PI) ? 2.0 * Math.PI : 0;
+            }
+            else if (accMagOrientation[1] < -0.5 * Math.PI && gyroOrientation[1] > 0.0) {
+            	fusedOrientation[1] = (float) (FILTER_COEFFICIENT * gyroOrientation[1] + oneMinusCoeff * (accMagOrientation[1] + 2.0 * Math.PI));
+            	fusedOrientation[1] -= (fusedOrientation[1] > Math.PI)? 2.0 * Math.PI : 0;
+            }
+            else {
+            	fusedOrientation[1] = FILTER_COEFFICIENT * gyroOrientation[1] + oneMinusCoeff * accMagOrientation[1];
+            }
+            
+            // roll
+            if (gyroOrientation[2] < -0.5 * Math.PI && accMagOrientation[2] > 0.0) {
+            	fusedOrientation[2] = (float) (FILTER_COEFFICIENT * (gyroOrientation[2] + 2.0 * Math.PI) + oneMinusCoeff * accMagOrientation[2]);
+        		fusedOrientation[2] -= (fusedOrientation[2] > Math.PI) ? 2.0 * Math.PI : 0;
+            }
+            else if (accMagOrientation[2] < -0.5 * Math.PI && gyroOrientation[2] > 0.0) {
+            	fusedOrientation[2] = (float) (FILTER_COEFFICIENT * gyroOrientation[2] + oneMinusCoeff * (accMagOrientation[2] + 2.0 * Math.PI));
+            	fusedOrientation[2] -= (fusedOrientation[2] > Math.PI)? 2.0 * Math.PI : 0;
+            }
+            else {
+            	fusedOrientation[2] = FILTER_COEFFICIENT * gyroOrientation[2] + oneMinusCoeff * accMagOrientation[2];
+            }
+     
+            // overwrite gyro matrix and orientation with fused orientation
+            // to comensate gyro drift
+            gyroMatrix = getRotationMatrixFromOrientation(fusedOrientation);
+            System.arraycopy(fusedOrientation, 0, gyroOrientation, 0, 3);
+            
+            return fusedOrientation;
+        }
+          	
+        public void calculateAccMagOrientation() {
+    	    if(SensorManager.getRotationMatrix(rotationMatrix, null, accel, magnet)) {
+    	        SensorManager.getOrientation(rotationMatrix, accMagOrientation);
+    	        azimuth = (float) Math.toDegrees(accMagOrientation[0]); // orientation
+                azimuth = (azimuth + 360) % 360;
+                testTextBox2.setText("** azimuth: "+d.format(azimuth));
+    	    }
+    	}
+        
         private void getRotationVectorFromGyro(float[] gyroValues,
                 float[] deltaRotationVector,
                 float timeFactor)
@@ -411,9 +543,7 @@ public class Compass implements SensorEventListener {
     		deltaRotationVector[2] = sinThetaOverTwo * normValues[2];
     		deltaRotationVector[3] = cosThetaOverTwo;
     	}
-    	
-        // This function performs the integration of the gyroscope data.
-        // It writes the gyroscope based orientation into gyroOrientation.
+
         public void gyroFunction(SensorEvent event) {
             // don't start until first accelerometer/magnetometer orientation has been acquired
             if (accMagOrientation == null)
@@ -450,8 +580,15 @@ public class Compass implements SensorEventListener {
          
             // get the gyroscope based orientation from the rotation matrix
             SensorManager.getOrientation(gyroMatrix, gyroOrientation);
+            
+            /*
+            float[] fo = calculateOrientation();    
+            float dir = calcAzimutch(fo[0]);
+            testTextBox.setText("filter: "+d.format(dir));
+            calcSteps(fo, dir);
+            */
         }
-        
+                     
         private float[] getRotationMatrixFromOrientation(float[] o) {
             float[] xM = new float[9];
             float[] yM = new float[9];
@@ -484,7 +621,7 @@ public class Compass implements SensorEventListener {
             resultMatrix = matrixMultiplication(zM, resultMatrix);
             return resultMatrix;
         }
-        
+              
         private float[] matrixMultiplication(float[] A, float[] B) {
             float[] result = new float[9];
          
@@ -502,83 +639,347 @@ public class Compass implements SensorEventListener {
          
             return result;
         }
-
-//******************************************************************************************** step detect
-        SharedValue mIndoorTrackSettings;
-        
-    	private static final int BLOCKSIZE = 8; // Threshold continuous or continuous 0 1
-    	private int stepCount; // Detecting the number of footsteps
-    	private double stepLength; //step
-    	private boolean STEPDETECTED = false; // Footstep detection flag
-    	private double priOrientation = 0f; // Previous step in the direction
-    	
-
-    	private final static boolean FIXED_STEP_LENGTH = true;
-    	private final static int HAND_HELD = 1;
-    	private final static int TROUSER_POCKET = 2;
-    	
-    	private int swSize; // Sliding window size
-    	private static final int W = 15; // Local window size, used to calculate the local mean and the variance of the acceleration
-    	
-    	private List<float[]> accelList = new ArrayList<float[]>(); // Acceleration list
-    	private List<float[]> orientationList = new ArrayList<float[]>(); // Magnetometer direction list
-    	private List<float[]> gyroOrientationList = new ArrayList<float[]>(); // Gyro direction list
-    	
-        private void checkForStep(List<float[]> orientationList) {
-   		
-    		List<Float> magnitudeOfAccel = StepDetectionUtil.getMagnitudeOfAccel(accelList);
-    		List<Float> localMeanAccel = StepDetectionUtil.getLocalMeanAccel(magnitudeOfAccel, W);
-    		float threshold = StepDetectionUtil.getAverageLocalMeanAccel(localMeanAccel) + 0.5f;
-    		List<Integer> condition = StepDetectionUtil.getCondition(localMeanAccel, threshold);
+       
+    	private void calculateLinearAcceleration(float[] tmporientation) {
+    		//System.arraycopy(gyroOrientation, 0, absoluteFrameOrientation, 0, 3);
+    		System.arraycopy(accel, 0, tmpAccel, 0, 3);
     		
-    		int numOne = 0; // Records to determine the condition condition, the number of consecutive 1
-    		int numZero = 0; // Records to determine the condition condition, the number of consecutive 0
-    		boolean flag = false; // Record the current point is 1 or 0
     		
-    		for(int i = 0, j = 1; i < swSize - 1 && j < swSize - W; i++, j++) {
-    			flag = StepDetectionUtil.isOne(condition.get(i)); // Analyzing the condition before sample point i determine whether a
-    			if((condition.get(i) == condition.get(j)) && flag == true) 
-    			{				
-    				numOne++;
-    			}
+    		// values[0]: azimuth, rotation around the Z axis.
+    		// values[1]: pitch, rotation around the X axis.
+    		// values[2]: roll, rotation around the Y axis.
 
-    			if((condition.get(i) == condition.get(j)) && flag == false) 
-    			{
-    				numZero++;	
-    			}
+    		// Find the gravity component of the X-axis
+    		// = g*-cos(pitch)*sin(roll);
+    		components[0] = (float) (SensorManager.GRAVITY_EARTH
+    				* -Math.cos(tmporientation[1]) * Math
+    				.sin(tmporientation[2]));
 
-    			if((condition.get(i) != condition.get(j)) && j > W && j < swSize - W) {
-    				if(numOne > BLOCKSIZE && numZero > BLOCKSIZE) {
-    					STEPDETECTED = true;
-    					stepCount++;
-    					float meanA = StepDetectionUtil.getMean(localMeanAccel, j, W);
-    					
-    					if(!mIndoorTrackSettings.getStepLengthMode() == FIXED_STEP_LENGTH)
-    						{
-    						stepLength = StepDetectionUtil.getSL(0.33f, meanA);
-    						}
-    					else stepLength = mIndoorTrackSettings.getStepLength() / 100f;
-    					
-    					double meanOrientation = 0;
-    					meanOrientation = StepDetectionUtil.getMeanOrientation(numOne, numZero, j, 
-    							orientationList, mIndoorTrackSettings.getPhonePosition(), mIndoorTrackSettings.getAlgorithms());
-    					
-    					priOrientation = meanOrientation;
+    		// Find the gravity component of the Y-axis
+    		// = g*-sin(pitch);
+    		components[1] = (float) (SensorManager.GRAVITY_EARTH * -Math
+    				.sin(tmporientation[1]));
 
-    	      			mHandler.post(new Runnable() {
-    	                    public void run() {
-    	                    	compassTextBox.setText("in F steps: "+stepCount);
-    	                    }
-         	           });
-    					  					
-    					
-    					numOne = 0;
-    					numZero = 0;
-    				}
-    			}
-    		}
+    		// Find the gravity component of the Z-axis
+    		// = g*cos(pitch)*cos(roll);
+    		components[2] = (float) (SensorManager.GRAVITY_EARTH
+    				* Math.cos(tmporientation[1]) * Math
+    				.cos(tmporientation[2]));
+
+    		// Subtract the gravity component of the signal
+    		// from the input acceleration signal to get the
+    		// tilt compensated output.
+    		linearAcceleration[0] = (tmpAccel[0] - components[0]);
+    		linearAcceleration[1] = (tmpAccel[1] - components[1]);
+    		linearAcceleration[2] = (tmpAccel[2] - components[2]);
+
+    		linearAcceleration = meanFilterLinearAcceleration
+    				.filterFloat(linearAcceleration);
     		
+    		accVectValue = (float)Math.sqrt((tmpAccel[0]*tmpAccel[0])+(tmpAccel[1]*tmpAccel[1])+(tmpAccel[2]*tmpAccel[2]));	
+    		newLinAccVectValue2 = (float)Math.sqrt((components[0]*components[0])+(components[1]*components[1])+(components[2]*components[2]));    		
+    		newLinAccVectValue = accVectValue - newLinAccVectValue2;
+    		
+    		
+    		accVectValue = (float)Math.sqrt((linearAcceleration[0]*linearAcceleration[0])+(linearAcceleration[1]*linearAcceleration[1])+(linearAcceleration[2]*linearAcceleration[2]));
+    		
+        	mHandler.post(new Runnable() {
+                public void run() {
+                	exampleSeries.appendData(new GraphViewData(graphIndex, newLinAccVectValue), true, 1024);
+                	//exampleSeries.appendData(new GraphViewData(graphIndex, accVectValue), true, 1024);
+                	//testTextBox2.setText("sample: "+index);
+                	//adjustArrow();
+                	testTextBox.setText("filter: "+d.format(azimuth));
+                    graphIndex++; 
+                }
+       });
+            //exampleSeries.appendData(new GraphViewData(graphIndex, newLinAccVectValue), true, 1024);
+    		//graphIndex++;
+    		
+    		//saveToFile(linearAcceleration, newLinAccVectValue);
+    		    		
     	}
 
+// ******************************************************************************************** step detect
+    	private MeanFilter meanFilterAcceleration;
+    	private MeanFilter meanFilterMagnetic;
+    	
+    	private StdDev varianceAccel;
+    	
+    	private float[] r = new float[9];
+    	// The gravity components of the acceleration signal.
+    	private float[] components2 = new float[3];
+
+    	private float[] linearAcceleration2 = new float[]
+    	{ 0, 0, 0 };
+
+    	private float[] acceleration = new float[]
+    	{ 0, 0, 0 };
+    	private float[] magnetic = new float[]
+    	{ 0, 0, 0 };
+    	
+    	private boolean firstStartFlag = true;
+// ******************************************************************************************** step detect
+    	
+    	//public float[] calculate(float[] acceleration, float[] magnetic)
+    	public void calculate(float[] acceleration, float[] magnetic)
+        {
+            // Get a local copy of the sensor values
+            System.arraycopy(acceleration, 0, this.accel, 0,
+                    acceleration.length);
+     
+            // Get a local copy of the sensor values
+            System.arraycopy(magnetic, 0, this.magnet, 0, acceleration.length);
+     
+            // Get the rotation matrix to put our local device coordinates
+            // into the world-coordinate system.
+            if (SensorManager.getRotationMatrix(r, null, acceleration, magnetic))
+            {
+                // values[0]: azimuth/yaw, rotation around the Z axis.
+                // values[1]: pitch, rotation around the X axis.
+                // values[2]: roll, rotation around the Y axis.
+                float[] values = new float[3];
+     
+                // NOTE: the reference coordinate-system used is different
+                // from the world coordinate-system defined for the rotation
+                // matrix:
+                // X is defined as the vector product Y.Z (It is tangential
+                // to the ground at the device's current location and
+                // roughly points West). Y is tangential to the ground at
+                // the device's current location and points towards the
+                // magnetic North Pole. Z points towards the center of the
+                // Earth and is perpendicular to the ground.
+                SensorManager.getOrientation(r, values);
+     
+                float magnitude = (float) (Math.sqrt(Math.pow(this.acceleration[0],2)
+                        + Math.pow(this.acceleration[1], 2)
+                        + Math.pow(this.acceleration[2], 2)) / SensorManager.GRAVITY_EARTH);
+     
+                double var = varianceAccel.addSample(magnitude);
+                 
+
+                
+                // Attempt to estimate the gravity components when the device is
+                // stable and not experiencing linear acceleration.
+                if (var < 0.05)
+                {
+                    //values[0]: azimuth, rotation around the Z axis.
+                    //values[1]: pitch, rotation around the X axis.
+                    //values[2]: roll, rotation around the Y axis.
+                     
+                    // Find the gravity component of the X-axis
+                    // = g*-cos(pitch)*sin(roll);
+                	components2[0] = (float) (SensorManager.GRAVITY_EARTH * -Math.cos(values[1]) * Math.sin(values[2]));
+                	//components2[0] = (float) (-Math.cos(values[1]) * Math.sin(values[2]));
+                     
+                    // Find the gravity component of the Y-axis
+                    // = g*-sin(pitch);
+                	components2[1] = (float) (SensorManager.GRAVITY_EARTH * -Math.sin(values[1]));
+                	//components2[1] = (float) (-Math.sin(values[1]));
+     
+                    // Find the gravity component of the Z-axis
+                    // = g*cos(pitch)*cos(roll);
+                	components2[2] = (float) (SensorManager.GRAVITY_EARTH * Math.cos(values[1]) * Math.cos(values[2]));
+                	//components2[2] = (float) (Math.cos(values[1]) * Math.cos(values[2]));
+
+                	
+            		newLinAccVectValue2 = (float)Math.sqrt((components[0]*components[0])+(components[1]*components[1])+(components[2]*components[2]));    		
+            		
+                }
+                accVectValue = (float)Math.sqrt((this.acceleration[0]*this.acceleration[0])+(this.acceleration[1]*this.acceleration[1])+(this.acceleration[2]*this.acceleration[2]));	
+                //newLinAccVectValue = ((accVectValue - newLinAccVectValue2)-SensorManager.GRAVITY_EARTH)/ SensorManager.GRAVITY_EARTH;
+                newLinAccVectValue = ((accVectValue - newLinAccVectValue2)- SensorManager.GRAVITY_EARTH)/ SensorManager.GRAVITY_EARTH;
+                
+                // Subtract the gravity component of the signal
+                // from the input acceleration signal to get the
+                // tilt compensated output.
+                linearAcceleration2[0] = (this.acceleration[0] - components2[0])/SensorManager.GRAVITY_EARTH;
+                linearAcceleration2[1] = (this.acceleration[1] - components2[1])/SensorManager.GRAVITY_EARTH;
+                linearAcceleration2[2] = (this.acceleration[2] - components2[2])/SensorManager.GRAVITY_EARTH;
+                
+               // newLinAccVectValue = (float)Math.sqrt((linearAcceleration2[0]*linearAcceleration2[0])+(linearAcceleration2[1]*linearAcceleration2[1])+(linearAcceleration2[2]*linearAcceleration2[2]));
+                exampleSeries.appendData(new GraphViewData(graphIndex, newLinAccVectValue), true, 1024);
+            	graphIndex++;
+            	
+            	long timeDiff = System.currentTimeMillis()-firstStartTime; 
+            	Datalist.add(new dataPoints(newLinAccVectValue, timeDiff));
+            	
+            	saveToFile(linearAcceleration2, newLinAccVectValue, timeDiff);
+            	//checkForStep(newLinAccVectValue);
+            	if(Datalist.size()>=W)
+    			{
+    				//ArrayList<ArrayList<Peaks>> tmpPeaks = 
+    				findExtremaLocal(Datalist, 0.07f);
+    				//checkPeaksForSteps(tmpPeaks);				
+    				Datalist.clear();	
+    				
+    				compassTextBox.setText("steps: " + stepCounter);
+    			}
+            }
+
+            
+            //return linearAcceleration2;
+        }
+    	
+// **************************************************************************************** check step stuff
+    	public void resetData(){
+    		//allLastMinPeaks.clear();
+    		//allLastMaxPeaks.clear();
+    		//Datalist.clear();
+    		stepCounter=0;
+    		//startTime = System.currentTimeMillis();
+    		//firstStartTime = startTime;
+    		mn = Float.MAX_VALUE; 
+    		mx = Float.MIN_VALUE;
+    		minp=0;
+    		maxp=0;
+    		lastIndex=0;
+    		lastTimeStep=0;
+    	} 
+
+    	class dataPoints { 
+    	    public float val;
+    	    long timestamp;
+    	    public dataPoints(float v, long t){
+    	    	this.val=v;
+    	    	this.timestamp = t;
+    	    }
+    	}
+    	
+    	class Peaks {
+    	    public int mxpos;
+    	    public float mx;
+    	    long timestamp;
+    	    public Peaks(int mxpos, float mx, long timestamp){
+    	    	this.mxpos=mxpos;
+    	    	this.mx=mx;
+    	    	this.timestamp = timestamp;
+    	    }
+    	}
+
+    	long lastTimeStep=0;
+    	int lastIndex=0;
+    	dataPoints lastPoint;
+    	int lookformax = 1;
+    	float mn = Float.MAX_VALUE; 
+    	float mx = Float.MIN_VALUE;
+    	int minp=0;
+    	int maxp=0;
+    	int W = 100;
+    	long lastPeakTime=0;
+    	int stepCounter=0;
+    	Peaks lastPeak;
+    	
+    	ArrayList<Peaks> allLastMinPeaks = new ArrayList<Peaks>();
+        ArrayList<Peaks> allLastMaxPeaks = new ArrayList<Peaks>();
+        ArrayList<dataPoints> Datalist = new ArrayList<dataPoints>();
+        
+// *********************************************************************************** check step functions       
+    	
+        public void findExtremaLocal(ArrayList<dataPoints> pointList, float delta){
+    		//lastPoint = pointList.get(pointList.size()-1);
+    		ArrayList<Peaks> minPeaks = new ArrayList<Peaks>();
+    		ArrayList<Peaks> maxPeaks = new ArrayList<Peaks>();	
+    		//ArrayList<ArrayList<Peaks>> extremas = new ArrayList<ArrayList<Peaks>>();
+    		Peaks currentPeak = new Peaks(0,0,0);
+    		
+    		
+    		int num = pointList.size();
+    		//float mn = Float.MAX_VALUE; 
+    		//float mx = Float.MIN_VALUE;
+    		int mnpos = -1; 
+    		int mxpos = -1;
+    		
+    		//int W = 10;
+    		
+    		for(int i=0;i<num;i++)
+    		{
+    			float currentValue = pointList.get(i).val;
+    			long time = pointList.get(i).timestamp;
+    			
+    			if(currentValue > mx)
+    			{
+    				mx = currentValue;
+    				mxpos = i;
+    			}
+    			if(currentValue < mn)
+    			{
+    				mn = currentValue; 
+    				mnpos = i;
+    			}
+    			
+    			if(lookformax == 1)
+    			{
+    				if(currentValue<(mx-delta))
+    				{
+    					//Log.e("GRAPH", "findExtremaLocal: maxPeaks= "+(mxpos+lastIndex)+" , val: "+mx + " , t: " +time );
+    					mn = currentValue;
+    					mnpos = i;
+    					currentPeak = new Peaks(mxpos, mx, time);
+    					maxPeaks.add(currentPeak);    				        				   
+    				    lookformax = 0;
+    				    maxp++;
+    				    
+    				    //lastPeakTime=System.currentTimeMillis();    				    
+    				}
+    			}
+    			else
+    			{
+    				if(currentValue>(mn+delta))
+    				{
+    					//Log.e("GRAPH", "findExtremaLocal: minPeaks= "+(mnpos+lastIndex)+" , val: "+mn + " , t: " +time );
+    					mx = currentValue; 
+    					mxpos = i;
+    					currentPeak = new Peaks(mnpos, mn, time);
+    					minPeaks.add(currentPeak);    					    				        				    
+    				    lookformax = 1;
+    				    minp++;
+    				    allLastMinPeaks.add(currentPeak);
+    				    //lastPeakTime=System.currentTimeMillis();
+    				}
+    			}
+    			
+    			
+        		// jezeli wykryje krok, nulluje lastPeak
+        		if(lastPeak == null)
+        		{
+        			lastPeak = currentPeak;
+        			Log.e("GRAPH", "no last peak !!!" );
+        		}
+        		else
+        		{
+        			if(currentPeak != null)
+        			if(currentPeak.timestamp != 0)
+        			{
+    	    			long dPeaks = currentPeak.timestamp - lastPeak.timestamp;
+    	    			Log.e("GRAPH", "----------------------------------------------------");
+    	    			Log.e("GRAPH", "lastPeak time: " + lastPeak.timestamp + " , curent: " +  currentPeak.timestamp);
+    	    			Log.e("GRAPH", "lastPeak val: " + lastPeak.mx + " , curent: " +  currentPeak.mx);
+    	    			Log.e("GRAPH", "----------------------------------------------------");
+    	    			
+    	    			//if(lastPeak.mx > delta && currentPeak.mx < -delta)
+    	    			if(lastPeak.mx > 0 && currentPeak.mx < 0)
+    		    		{
+    	    				float dV = Math.abs(currentPeak.mx - lastPeak.mx);
+    	    				if(dV > delta)
+    	    				{
+    	    					if(dPeaks < 500 && dPeaks > 150) // mozliwy krok
+    	    					{
+    	    						// 	sprawdz     					
+    	    						stepCounter++;
+    	    						lastPeak=null;
+    	    	    			}
+    	    				}
+    	        		}    			
+    	    			lastPeak = currentPeak;
+    	    			currentPeak = null;
+        			}
+        		}
+    		}
+
+    		
+    		
+    		Log.e("GRAPH", "findExtremaLocal: stepCounter ->" + stepCounter);
+    	}
 }
  

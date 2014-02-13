@@ -294,7 +294,7 @@ public class OpenCVWorker extends Mat implements Runnable {
 		setupCamera();
 
 		initMatrices();
-
+/*
 		while (mDoProcess && mCamera != null) {
 			boolean grabbed = mCamera.grab();
 			if (grabbed) {
@@ -550,7 +550,7 @@ public class OpenCVWorker extends Mat implements Runnable {
 				notifyFpsResult(fps);
 			}
 		}
-
+*/
 		if (mCamera != null) {
 			mCamera.release();
 			mCamera = null;

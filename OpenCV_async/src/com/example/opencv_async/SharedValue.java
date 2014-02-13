@@ -11,7 +11,7 @@ public class SharedValue {
 	private final static int GYROSCOPE_BASED_ALGORITHM = 2;
 	private final static int HDE_BASED_ALGORITHM = 3;
 	private final static int PSP_BASED_ALGORITHM = 4;
-	private int _SENSITIVITY = 100;
+	private int _SENSITIVITY = 300;
 	private static SharedValue instance = null;
 
 	public SharedValue() {
